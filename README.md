@@ -76,6 +76,5 @@ project/
     Google Calendar export
 
 ❤️ Motivation
-
 Because planning your week shouldn’t feel like debugging someone else’s code.
 This project keeps things simple, elegant, and actually usable.
