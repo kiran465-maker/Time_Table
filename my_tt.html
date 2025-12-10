@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Classic Timetable — Pro Features (XLSX, Summary, Auto-Dark)</title>
+
+<!-- SheetJS for XLSX export -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+  :root{
+    --bg:#f7f8fb; --card:#fff; --text:#111827; --muted:#e5e7eb;
+    --primary:#2563eb; --accent:#22c55e; --warn:#facc15;
+  }
+  [data-theme="dark"]{
+    --bg:#071025; --card:#0f1724; --text:#e6eefc; --muted:#22304e;
+    --primary:#7c9cff; --accent:#22c55e; --warn:#eab308;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+  header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:12px 16px;gap:8px}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{border:0;padding:8px 12px;border-radius:10px;background:var(--primary);color:#fff;font-weight:700;cursor:pointer}
+  button.alt{background:#374151} button.warn{background:#ef4444}
+  input[type="text"], input[type="file"]{padding:8px;border-radius:10px;border:1px solid var(--muted);background:var(--card);color:var(--text)}
+  label.switch{display:flex;gap:6px;align-items:center;cursor:pointer}
+
+  main{max-width:1200px;margin:12px auto;padding:0 12px}
+  table{width:100%;border-collapse:separate;border-spacing:10px;transition:transform .2s}
+  thead th{background:var(--primary);color:#fff;padding:14px;border-radius:12px;position:sticky;top:0}
+  tbody td, tbody th{background:var(--card);border:1px solid var(--muted);border-radius:12px;position:relative;min-width:120px;height:92px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+  .cell-inner{display:flex;align-items:center;justify-content:center;text-align:center;font-weight:800;height:100%;width:100%;padding:8px 10px;white-space:normal;word-break:break-word;outline:none}
+  .time{background:#eef2ff;font-weight:800}
+  [data-theme="dark"] .time{background:#0f1a3e}
+
+  .highlight{background: #fef3c7 !important; border-color:#f59e0b !important}
+  .dot{position:absolute;top:8px;right:8px;width:14px;height:14px;border-radius:4px;background:var(--warn);border:1px solid #999;cursor:pointer}
+  .dot.active{background:var(--accent)}
+
+  .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50}
+  .modal{display:none;position:fixed;inset:0;place-items:center;z-index:60}
+  .card{width:min(920px,94vw);background:var(--card);border:1px solid var(--muted);border-radius:12px;padding:18px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+  .card h3{margin:0 0 8px}
+  textarea{width:100%;height:220px;border:1px solid var(--muted);border-radius:10px;padding:10px;background:var(--bg);color:var(--text)}
+
+  .small{font-size:13px;padding:6px 8px;border-radius:8px}
+  .flex{display:flex;gap:8px;align-items:center}
+  .right{justify-content:flex-end}
+  .results{max-height:50vh;overflow:auto;border:1px solid var(--muted);border-radius:10px;padding:8px;margin-top:8px;background:var(--bg);white-space:pre-wrap}
+  .controls-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <strong style="font-size:18px">Classic Timetable — Pro</strong>
+    <div class="controls-row" style="opacity:.9">
+      <button id="btnAdd">➕ Add Row</button>
+      <button id="btnDel" class="alt">➖ Delete Last</button>
+      <button id="btnReset" class="warn">🔄 Reset</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label class="switch"><input type="checkbox" id="darkToggle"> 🌙 Dark</label>
+    <label class="switch"><input type="checkbox" id="autoDark"> ⏳ Auto (use settings)</label>
+
+    <input id="findTime" type="text" placeholder="Find time e.g. 9 AM" />
+    <button id="btnFind">Find</button>
+
+    <input id="kw" type="text" placeholder="Keyword e.g. Gym" />
+    <button id="btnKw">Search</button>
+
+    <button id="exportJson" class="alt">Export JSON</button>
+    <button id="exportCsv" class="alt">Export CSV</button>
+    <button id="exportXlsx" class="alt">Export Excel</button>
+
+    <label class="alt small" style="cursor:pointer">
+      <input id="importJson" type="file" accept="application/json" style="display:none" /> Import
+    </label>
+
+    <button id="summaryBtn" class="small">Weekly Summary</button>
+    <button id="settingsBtn" class="small alt">Auto-Dark Settings</button>
+  </div>
+</header>
+
+<main>
+  <table id="tbl"></table>
+</main>
+
+<!-- Notes / Flash Modal -->
+<div class="overlay" id="ov"></div>
+<div class="modal" id="pop">
+  <div class="card">
+    <h3 id="popTitle">📝 Notes</h3>
+    <textarea id="note"></textarea>
+    <div class="flex right" style="margin-top:10px">
+      <button id="closePop" class="alt">Close</button>
+      <button id="saveNote">Save</button>
+    </div>
+    <div id="results" class="results" hidden></div>
+  </div>
+</div>
+
+<!-- Weekly Summary Modal -->
+<div class="modal" id="summaryModal">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>🗓️ Weekly Summary (filled tasks)</h3>
+      <div style="display:flex;gap:8px">
+        <button id="printSummary" class="alt">Print Summary</button>
+        <button id="closeSummary" class="alt">Close</button>
+      </div>
+    </div>
+    <div id="summaryList" style="margin-top:12px;max-height:60vh;overflow:auto"></div>
+  </div>
+</div>
+
+<!-- Auto-Dark Settings Modal -->
+<div class="modal" id="settingsModal">
+  <div class="card">
+    <h3>⏳ Auto-Dark Settings</h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <div>
+        <div style="font-size:13px;opacity:.8">Start Time</div>
+        <input id="startTime" type="text" placeholder="e.g., 12:00 PM or 00:00" />
+      </div>
+      <div>
+        <div style="font-size:13px;opacity:.8">End Time</div>
+        <input id="endTime" type="text" placeholder="e.g., 02:00 AM or 02:00" />
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-left:auto">
+        <label><input id="autoEnable" type="checkbox" /> Enable Auto-Dark</label>
+        <div style="font-size:13px;color:var(--text);opacity:.85">Default: <b>12:00 PM → 02:00 AM</b> (wraps midnight)</div>
+      </div>
+    </div>
+    <div class="flex right" style="margin-top:12px">
+      <button id="closeSettings" class="alt">Close</button>
+      <button id="saveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------------------
+   Data model & helpers
+   --------------------------- */
+const STORAGE_KEY = 'classic_pro_with_xlsx.v1';
+const PREF_KEY = 'classic_pro_prefs.v1';
+
+const DAYS = ["Time","Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const DEFAULT_SLOTS = [
+  "07:00 AM","08:00 AM","09:00 AM","10:00 AM","11:00 AM",
+  "12:00 PM","01:00 PM","02:00 PM","03:00 PM","04:00 PM",
+  "05:00 PM","06:00 PM","07:00 PM","08:00 PM","09:00 PM","10:00 PM"
+];
+
+function makeEmptyRow(time){
+  return { time, cells: Array(7).fill(0).map(()=>({ text:'', note:'', highlighted:false })) };
+}
+
+function loadState(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(!raw) return DEFAULT_SLOTS.map(t=>makeEmptyRow(t));
+  try{ return JSON.parse(raw); } catch(e){ return DEFAULT_SLOTS.map(t=>makeEmptyRow(t)); }
+}
+function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+let state = loadState();
+
+/* Time parsing & formatting (loose) */
+function pad2(n){ return (n<10?'0':'')+n; }
+function to12(h){
+  const am = h < 12;
+  const hh = ((h+11)%12)+1;
+  return { hh, am };
+}
+function parseLoose(s){
+  if(!s) return null;
+  s = String(s).trim().toLowerCase();
+  s = s.replace(/\./g,':');
+  const m = s.match(/^(\d{1,2})(?::(\d{1,2}))?\s*(am|pm)?$/i);
+  if(!m) return null;
+  let h = parseInt(m[1],10);
+  let min = m[2]? parseInt(m[2],10): 0;
+  let ap = m[3];
+  if(h>24 || min>59) return null;
+  if(ap){
+    ap = ap.toLowerCase();
+    if(ap==='pm' && h<12) h+=12;
+    if(ap==='am' && h===12) h=0;
+  }
+  return h*60 + min;
+}
+function format12(totalMin){
+  totalMin = ((totalMin%1440)+1440)%1440;
+  const h = Math.floor(totalMin/60);
+  const m = totalMin%60;
+  const { hh, am } = to12(h);
+  return `${pad2(hh)}:${pad2(m)} ${am? 'AM':'PM'}`;
+}
+
+/* Preferences (auto-dark times) */
+const defaultPrefs = { theme:'light', autoEnabled:true, startMin:12*60, endMin:2*60 }; // 12:00 PM -> 2:00 AM
+function loadPrefs(){
+  const raw = localStorage.getItem(PREF_KEY);
+  if(!raw) return {...defaultPrefs};
+  try { return Object.assign({}, defaultPrefs, JSON.parse(raw)); } catch(e) { return {...defaultPrefs}; }
+}
+function savePrefs(){ localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); }
+let prefs = loadPrefs();
+
+/* ---------------------------
+   Rendering table
+   --------------------------- */
+const tbl = document.getElementById('tbl');
+
+function renderTable(){
+  tbl.innerHTML = '';
+  // header
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  DAYS.forEach(d => {
+    const th = document.createElement('th');
+    th.textContent = d;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  tbl.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+
+  state.forEach((row, rowIndex) => {
+    const tr = document.createElement('tr');
+    tr.draggable = true;
+    tr.dataset.idx = rowIndex;
+
+    // Time cell
+    const tdTime = document.createElement('td');
+    tdTime.className = 'time';
+    const timeInner = document.createElement('div');
+    timeInner.className = 'cell-inner';
+    timeInner.textContent = row.time;
+    tdTime.appendChild(timeInner);
+    tr.appendChild(tdTime);
+
+    // double-click to edit time
+    tdTime.addEventListener('dblclick', () => {
+      const old = row.time;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = old;
+      input.style.width = '90%';
+      input.style.textAlign = 'center';
+      input.style.fontWeight = '800';
+      tdTime.replaceChildren(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        const val = input.value.trim();
+        const parts = val.split(/\s*-\s*/);
+        if(parts.length===2){
+          const a = parseLoose(parts[0]);
+          const b = parseLoose(parts[1]);
+          if(a!=null && b!=null){
+            row.time = `${format12(a)} – ${format12(b)}`;
+            saveState(); renderTable();
+            return;
+          }
+        }
+        const m = parseLoose(val) ?? parseLoose(old);
+        row.time = m!=null ? format12(m) : old;
+        saveState(); renderTable();
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); input.blur(); }});
+    });
+
+    // Day cells
+    row.cells.forEach((cell, cIndex) => {
+      const td = document.createElement('td');
+      const inner = document.createElement('div');
+      inner.className = 'cell-inner';
+      inner.contentEditable = true;
+      inner.spellcheck = false;
+      inner.innerText = cell.text;
+      td.appendChild(inner);
+
+      // flash dot
+      const dot = document.createElement('div');
+      dot.className = 'dot' + (cell.note && cell.note.trim() ? ' active' : '');
+      td.appendChild(dot);
+
+      if(cell.highlighted) td.classList.add('highlight');
+
+      // when user types inside
+      inner.addEventListener('input', () => {
+        cell.text = inner.innerText;
+        saveState();
+      });
+
+      // double click to highlight
+      td.addEventListener('dblclick', e => {
+        if(e.target === inner || e.target === td){
+          td.classList.toggle('highlight');
+          cell.highlighted = td.classList.contains('highlight');
+          saveState();
+        }
+      });
+
+      // open note popup
+      dot.addEventListener('click', e => {
+        e.stopPropagation();
+        openNotePopup(cell, dot);
+      });
+
+      tr.appendChild(td);
+    });
+
+    // drag & drop rows
+    tr.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', rowIndex.toString()); });
+    tr.addEventListener('dragover', e => e.preventDefault());
+    tr.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to = rowIndex;
+      if(Number.isInteger(from) && from !== to){
+        const item = state.splice(from,1)[0];
+        state.splice(to,0,item);
+        saveState();
+        renderTable();
+      }
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  tbl.appendChild(tbody);
+}
+
+/* ---------------------------
+   Notes popup
+   --------------------------- */
+const overlay = document.getElementById('ov');
+const pop = document.getElementById('pop');
+const noteArea = document.getElementById('note');
+const popTitle = document.getElementById('popTitle');
+let currentCellRef = null, currentDot = null;
+
+function openNotePopup(cellRef, dotEl){
+  currentCellRef = cellRef;
+  currentDot = dotEl;
+  noteArea.value = cellRef.note || '';
+  popTitle.textContent = '📝 Extra Details';
+  overlay.style.display = 'block';
+  pop.style.display = 'grid';
+  document.querySelector('main').style.filter = 'blur(4px)';
+}
+document.getElementById('closePop').addEventListener('click', closeNote);
+document.getElementById('saveNote').addEventListener('click', () => {
+  if(currentCellRef){
+    currentCellRef.note = noteArea.value;
+    if(currentDot) currentDot.classList.toggle('active', noteArea.value.trim() !== '');
+    saveState();
+  }
+  closeNote();
+});
+function closeNote(){
+  overlay.style.display = 'none';
+  pop.style.display = 'none';
+  document.querySelector('main').style.filter = '';
+  currentCellRef = null; currentDot = null; noteArea.value = '';
+}
+
+/* ---------------------------
+   Find & Keyword search
+   --------------------------- */
+function showModal(title, html){
+  popTitle.textContent = title;
+  document.getElementById('results').hidden = false;
+  document.getElementById('results').innerHTML = html;
+  overlay.style.display = 'block';
+  pop.style.display = 'grid';
+  document.querySelector('main').style.filter = 'blur(4px)';
+}
+document.getElementById('btnFind').addEventListener('click', ()=>{
+  const q = document.getElementById('findTime').value.trim();
+  if(!q) return alert('Enter a time like "9 AM"');
+  const p = parseLoose(q);
+  if(p==null) return alert('Could not parse time. Try "9 AM" or "09:30"');
+  const hits = [];
+  state.forEach((row,ri) => {
+    const label = row.time;
+    if(label.includes('–')){
+      const [a,b] = label.split('–').map(s => parseLoose(s.trim()));
+      if(a!=null && b!=null && p >= a && p <= b) hits.push(`Row ${ri+1}: ${label}`);
+    } else {
+      const a = parseLoose(label);
+      if(a!=null && a === p) hits.push(`Row ${ri+1}: ${label}`);
+    }
+  });
+  showModal('⏰ Time Matches', hits.length ? hits.join('<br>') : 'No matches');
+});
+document.getElementById('btnKw').addEventListener('click', ()=>{
+  const q = document.getElementById('kw').value.trim().toLowerCase();
+  if(!q) return alert('Enter a keyword');
+  const list = [];
+  state.forEach((row) => {
+    row.cells.forEach((c,ci) => {
+      if((c.text||'').toLowerCase().includes(q)){
+        list.push(`${DAYS[ci+1]} — ${row.time} : ${escapeHtml(c.text)}`);
+      }
+    });
+  });
+  showModal(`🔎 Results for "${q}"`, list.length ? list.join('<br>') : 'No matches');
+});
+function escapeHtml(s){ return (s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ---------------------------
+   Export / Import
+   --------------------------- */
+document.getElementById('exportJson').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'timetable.json'; a.click();
+});
+document.getElementById('exportCsv').addEventListener('click', ()=>{
+  const header = DAYS.join(',') + '\n';
+  const rowsCsv = state.map(r => {
+    const cellsEsc = r.cells.map(c => `"${(c.text||'').replace(/"/g,'""')}"`);
+    return [ `"${r.time}"`, ...cellsEsc ].join(',');
+  }).join('\n');
+  const blob = new Blob([header + rowsCsv], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'timetable.csv'; a.click();
+});
+// XLSX export (SheetJS)
+document.getElementById('exportXlsx').addEventListener('click', ()=>{
+  const aoa = [];
+  aoa.push(DAYS);
+  state.forEach(r => {
+    aoa.push([ r.time, ...r.cells.map(c => c.text || '') ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Optional: set column widths
+  const wscols = [{wch:18}, {wch:22},{wch:22},{wch:22},{wch:22},{wch:22},{wch:22},{wch:22}];
+  ws['!cols'] = wscols;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
+  XLSX.writeFile(wb, 'timetable.xlsx');
+});
+
+// JSON import
+document.getElementById('importJson').addEventListener('change', (e)=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const data = JSON.parse(r.result);
+      if(Array.isArray(data)){
+        state = data;
+        saveState();
+        renderTable();
+        alert('Imported successfully');
+      } else alert('Invalid JSON structure');
+    }catch(err){
+      alert('Invalid JSON file');
+    }
+  };
+  r.readAsText(f);
+});
+
+/* ---------------------------
+   Weekly Summary (only filled tasks)
+   --------------------------- */
+const summaryBtn = document.getElementById('summaryBtn');
+const summaryModal = document.getElementById('summaryModal');
+const summaryList = document.getElementById('summaryList');
+const closeSummary = document.getElementById('closeSummary');
+const printSummary = document.getElementById('printSummary');
+
+summaryBtn.addEventListener('click', ()=> {
+  const items = [];
+  state.forEach((r) => {
+    r.cells.forEach((c,ci) => {
+      const txt = (c.text || '').trim();
+      if(txt) items.push({ day: DAYS[ci+1], time: r.time, text: txt });
+    });
+  });
+  // sort by day order and time (approx)
+  const order = Object.fromEntries(DAYS.slice(1).map((d,i)=>[d,i]));
+  items.sort((a,b) => {
+    if(order[a.day] !== order[b.day]) return order[a.day] - order[b.day];
+    const at = parseLoose(a.time.split('–')[0].trim()) || 0;
+    const bt = parseLoose(b.time.split('–')[0].trim()) || 0;
+    return at - bt;
+  });
+
+  summaryList.innerHTML = items.length ? items.map(it => `<div style="padding:10px;border-radius:8px;border:1px solid var(--muted);margin-bottom:8px;background:var(--card)"><div style="font-weight:800">${it.day} — <span style="font-weight:900">${it.time}</span></div><div style="margin-top:6px">${escapeHtml(it.text)}</div></div>`).join('') : '<div style="opacity:.7">No tasks added yet.</div>';
+  summaryModal.style.display = 'grid';
+  document.querySelector('main').style.filter = 'blur(4px)';
+});
+closeSummary.addEventListener('click', ()=>{ summaryModal.style.display='none'; document.querySelector('main').style.filter=''; });
+printSummary.addEventListener('click', ()=>{
+  const html = summaryList.innerHTML;
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Weekly Summary</title><meta charset="utf-8"><style>body{font-family:Inter,Arial;padding:20px}</style></head><body><h1>Weekly Summary</h1>${html}</body></html>`);
+  w.document.close(); w.print();
+});
+
+/* ---------------------------
+   Auto-Dark settings
+   --------------------------- */
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const startTimeInput = document.getElementById('startTime');
+const endTimeInput = document.getElementById('endTime');
+const autoEnableCheckbox = document.getElementById('autoEnable');
+const closeSettings = document.getElementById('closeSettings');
+const saveSettingsBtn = document.getElementById('saveSettings');
+
+settingsBtn.addEventListener('click', () => {
+  startTimeInput.value = displayMin(prefs.startMin);
+  endTimeInput.value = displayMin(prefs.endMin);
+  autoEnableCheckbox.checked = prefs.autoEnabled;
+  settingsModal.style.display = 'grid';
+  document.querySelector('main').style.filter = 'blur(4px)';
+});
+closeSettings.addEventListener('click', ()=>{ settingsModal.style.display='none'; document.querySelector('main').style.filter=''; });
+saveSettingsBtn.addEventListener('click', ()=>{
+  // parse times, fallback to defaults
+  const s = parseLoose(startTimeInput.value) ?? prefs.startMin;
+  const e = parseLoose(endTimeInput.value) ?? prefs.endMin;
+  prefs.startMin = s;
+  prefs.endMin = e;
+  prefs.autoEnabled = autoEnableCheckbox.checked;
+  savePrefs();
+  settingsModal.style.display = 'none';
+  document.querySelector('main').style.filter = '';
+  alert('Saved auto-dark settings');
+});
+
+function displayMin(m){ return format12(m); }
+
+/* Auto-dark checker (handles wrap across midnight) */
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  prefs.theme = t;
+  savePrefs();
+}
+document.getElementById('darkToggle').addEventListener('change', (e) => {
+  const t = e.target.checked ? 'dark':'light';
+  applyTheme(t);
+});
+document.getElementById('autoDark').addEventListener('change', (e) => {
+  prefs.autoEnabled = e.target.checked;
+  savePrefs();
+});
+
+/* Auto-check loop */
+function autoCheck(){
+  if(!prefs.autoEnabled) return;
+  const now = new Date();
+  const m = now.getHours()*60 + now.getMinutes();
+  const s = prefs.startMin; const e = prefs.endMin;
+  // in-range logic with wrap
+  const inRange = s <= e ? (m >= s && m < e) : (m >= s || m < e);
+  applyTheme(inRange ? 'dark' : 'light');
+}
+
+/* ---------------------------
+   Row controls (add/delete/reset)
+   --------------------------- */
+document.getElementById('btnAdd').addEventListener('click', ()=>{
+  const last = state[state.length-1];
+  let next = DEFAULT_SLOTS[0];
+  if(last){
+    const lastLabel = last.time.split('–')[1]?.trim() || last.time;
+    const m = parseLoose(lastLabel);
+    next = (m!=null) ? format12(m + 60) : last.time;
+  }
+  state.push(makeEmptyRow(next));
+  saveState(); renderTable();
+});
+document.getElementById('btnDel').addEventListener('click', ()=>{ if(state.length>0){ state.pop(); saveState(); renderTable(); }});
+document.getElementById('btnReset').addEventListener('click', ()=>{ if(confirm('Reset timetable to defaults?')){ state = DEFAULT_SLOTS.map(t=>makeEmptyRow(t)); saveState(); renderTable(); }});
+
+/* ---------------------------
+   Utilities & init
+   --------------------------- */
+function init(){
+  prefs = loadPrefs();
+  // theme
+  document.getElementById('darkToggle').checked = (prefs.theme === 'dark');
+  document.getElementById('autoDark').checked = prefs.autoEnabled;
+  // inputs
+  startTimeInput.value = displayMin(prefs.startMin);
+  endTimeInput.value = displayMin(prefs.endMin);
+  autoEnableCheckbox.checked = prefs.autoEnabled;
+
+  applyTheme(prefs.theme);
+  renderTable();
+  autoCheck();
+  setInterval(autoCheck, 30*1000); // check every 30s
+}
+init();
+
+/* ---------------------------
+   Helper: escape & HTML
+   --------------------------- */
+function escapeHtml(s){ return (s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ---------------------------
+   Keyboard: close modals with Esc
+   --------------------------- */
+document.addEventListener('keydown', (e)=> {
+  if(e.key === 'Escape'){
+    closeNote();
+    summaryModal.style.display = 'none';
+    settingsModal.style.display = 'none';
+    document.querySelector('main').style.filter = '';
+  }
+});
+</script>
+</body>
+</html>
